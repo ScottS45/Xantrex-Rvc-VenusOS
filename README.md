@@ -9,6 +9,8 @@ It is a Python service that reads Xantrex Freedom Pro RV-C (CAN) frames and publ
 
 As of September 14, 2025, this is still under development with issues on the charger side.  The State for the inverter has an issue.
 
+**NOTE:** Hardware support is required.   For the raspberry Pi (and Cerbex I am sure) you needed a *USB to CAN Bus Converter Base Open-Source Hardware CANable*, which can be found on Amazon.  This will connect to the Xantrex.  I will put up pictures to help.
+
 **NOTE:** Other inverter/charger devices that support RV-C may also work.  I see no reason why they wouldn't as long as they support the RV-C standard.  Would just need to tweak the product name, and the source.
 
 - Inverter service: com.victronenergy.inverter.can_xantrex
