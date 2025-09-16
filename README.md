@@ -1,11 +1,11 @@
-# Xantrex RV-C → Venus OS D-Bus Driver
+# Xantrex RV-C → Venus OS D-Bus Driver (Cerbo or Pi)
 
 **Date Updated:** Sep 14, 2025  
 **Scott Sheen**
 
 This is my first python project.  I created it so I could have my Xantrex inverter/charger talk to my Pi running venus os.
 
-It is a Python service that reads Xantrex Freedom Pro RV-C (CAN) frames and publishes decoded values to Victron Venus OS D-Bus as inverter and charger services.
+It is a Python service that reads Xantrex Freedom Pro RV-C (CAN) frames and publishes decoded values to Victron Venus OS D-Bus, running on a PI or Cerbo, as inverter and charger services.
 
 As of September 14, 2025, this is still under development with issues on the charger side.  The State for the inverter has an issue.
 
