@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Version: 2.1.733.2025.09.13
-# Date: 2025-09-13
+# Version: 2.1.735.2025.09.16
+# Date: 2025-09-16
 
 # Xantrex Freedom Pro RV-C D-Bus Driver
 #
@@ -1313,7 +1313,7 @@ class XantrexService:
             # a charger value but if the volts is 0 throw the complete frame away    
             if dgn == 0x1FFCA:   
                 v = safe_u16(data, 1, 0.05)   # AC In L1 Voltage
-                if v <= 90:  #  when is is not charging the voltage is 0 but let's expand the capture
+                if v is None  or v <= 90:  #  when is is not charging the voltage is 0 but let's expand the capture
                     logger.info(f"[{self.frame_count:06}] [CAN ID - FFCA SKIPPED] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} DATA=[{data.hex(' ').upper()}]")                    
                     return True # consumed
 
@@ -1399,7 +1399,7 @@ class XantrexService:
                     if src == 0xD0 and service is self._InverterService:      # this gives us the correct /State value   Only for the inverter
                         pass  # allowed    we may want this to send to charger service if 42 or another source, but for now we do this.
                         
-                    else    
+                    else:    
                         continue  # skip everything else for FFD4
 
                     
