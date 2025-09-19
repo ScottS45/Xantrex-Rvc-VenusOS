@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Version: 2.1.765.2025.09.19
+# Version: 2.1.766.2025.09.19
 # Date: 2025-09-19
 
 # Xantrex Freedom Pro RV-C D-Bus Driver
@@ -1194,8 +1194,22 @@ class XantrexService:
                             self.xantrex_sources[src] = 129   #  inverter / charger
                         
                         #  we hard code the version to the latest.  If and when the dgn comes in, set the path correctly    
-                        FIRMWARE_VERSION = re.search(r'U3:0*([0-9]{1,2}\.[0-9]{2})', assembled_txt)
-                        if FIRMWARE_VERSION is not None:
+                        # search the *entire* assembled string for a firmware pattern.
+                        # re.search(pattern, string) -> re.Match | None
+                        #   • pattern: r'U3:0*([0-9]{1,2}\.[0-9]{2})'
+                        #       - 'U3:'        literal prefix before the version token
+                        #       - '0*'         zero or more leading zeros (accepts U3:02.14 and U3:2.14)
+                        #       - '([0-9]{1,2}\.[0-9]{2})'  CAPTURE GROUP #1:
+                        #           · one–two digits, a dot, then exactly two digits → e.g. "2.14", "12.34"
+                        #   • string: assembled_txt (ASCII reconstructed from the multi-frame payload)
+                        # RETURNS:
+                        #   - re.Match (type: <class 're.Match'>) when found; access the version text via .group(1) (type: str)
+                        #     · .group(0) is the full match (e.g., "U3:02.14"); .span()/.start()/.end() give positions
+                        #   - None when not found
+
+                        temp = re.search(r'U3:0*([0-9]{1,2}\.[0-9]{2})', assembled_txt)
+                        if temp is not None:
+                            FIRMWARE_VERSION = = temp.group(1)
                             self._InverterService['/FirmwareVersion'] = FIRMWARE_VERSION   
                             self._ChargerService['/FirmwareVersion']  = FIRMWARE_VERSION   
                     
