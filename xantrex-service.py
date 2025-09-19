@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Version: 2.1.735.2025.09.16
-# Date: 2025-09-16
+# Version: 2.1.765.2025.09.19
+# Date: 2025-09-19
 
 # Xantrex Freedom Pro RV-C D-Bus Driver
 #
@@ -280,9 +280,13 @@ def safe_s16(data: bytes | memoryview, offset: int, scale: float = 1.0, byteorde
         raw, = _UNPACK_S16(data, offset)
     else:
         raw, = _UNPACK_S16_BE(data, offset)
+        
+    if raw == 0x7FFF or raw == -1:   # -1 == 0xFFFF
+        return None
+        
+    return raw if scale == 1.0 else round(raw * scale, 3)
     
-    return None if raw == 0x7FFF else round(raw * scale, 3)
-
+    
 def safe_s32(data: bytes | memoryview, offset: int, scale: float = 1.0) -> Optional[float]:
     # Signed 32-bit LE. 0x7FFFFFFF ⇒ NA per RV-C.
     if len(data) < offset + 4: return None
@@ -329,7 +333,7 @@ def fahrenheit_to_c(val):
 # ─────────────────────────────────────────────────────────────────────────────
 INVERTER_DGN_MAP = {
     0x1FFD4: [  # INVERTER_STATUS              This is charger if the address is the primary *(0x42 default) or inverter if not that.
-        ('/State',                                  lambda d: RVC_INV_STATE.get((int(safe_u8(d, 0) or 0)) & 0x0F, 0),  '',  'Inverter operational state (0=Off,1=Standby,2=InvOnly,3=Bypass,4=Inv+Chg)'),
+        ('/StateNotCorrect',                        lambda d: RVC_INV_STATE.get((int(safe_u8(d, 0) or 0)) & 0x0F, 0),  '',  'Inverter operational state (0=Off,1=Standby,2=InvOnly,3=Bypass,4=Inv+Chg)'),
         ('/Ac/Out/LoadPercent',                     lambda d: safe_u8(d, 1),        '%',     'Percent of rated output'),
         # Bytes 3–7 are NA
     ],
@@ -408,7 +412,7 @@ INVERTER_DGN_MAP = {
         ('/Ac/Out/Total/PowerFactor',  lambda d: safe_s16(d, 6, 0.001),          '',      'Power Factor'),
     ],
     0x1FEE8: [  # INVERTER_DC_STATUS
-        ('/Dc/0/Voltage',              lambda d: safe_u16(d, 0, 0.05, 'big'),    'V',     'DC 0 Voltage'),
+        ('/Dc/0/Voltage',              lambda d: safe_u16(d, 1, 0.05, 'little'), 'V',     'DC 0 Voltage'),
         ('/Dc/0/Current',              lambda d: safe_s16(d, 2, 0.02, 'big'),    'A',     'DC 0 Current'),
     ],
     0x1FEBE: [  # INVERTER_LOAD_PRIORITY
@@ -752,11 +756,11 @@ class XantrexService:
         self.unmapped_seen       = set()             # DGNs we've seen but aren't in the DGN_MAPs
         self.unmapped_counts     = {}                # Unmapped DGN => count of how many times it's seen
         self.heartbeat_counter   = 0        
-        self._frame_counter      = 0
+        self.isthereaframe       = 0
         
         # Xantrex discovery (EE00)
         # we should not be hard coding these values, but xantrex does not seem to respond to the request
-        self.xantrex_sources       = {0x42: 129, 0xD0: 128 }   # = inverter/charger; accept SA 0x42 from boot   /  dict: SA -> function (NAME byte 5)  store what is found from the EE00 addresses claimed request  D0 = inverter?
+        self.xantrex_sources       = {0x42: 129}    #  D0 is victron for sure, let's see if we can just use xantrex data{0x42: 129, 0xD0: 128 }   # = inverter/charger; accept SA 0x42 from boot   /  dict: SA -> function (NAME byte 5)  store what is found from the EE00 addresses claimed request  D0 = inverter?
         self.multiframe_assemblies = {}  # {sa: {"len","exp","got","seq","pgn","buf","deadline"}}
         self.SA_toSkip             = set()
         self.primary_source        = 0x42 # default to this as the primary Source address.  We will confirm this via a request for EE00    - do not seem to get a response to ee00
@@ -959,7 +963,12 @@ class XantrexService:
                 
         self._InverterService['/Status'] = 'ok'
         self._ChargerService['/Status']  = 'ok'
+
+        self._InverterService['/State'] = 0   # prime the state as off.  If the unit is not on it will be correct.  If is on, it will be quickly updated.
+        self._ChargerService['/State']  = 0
         
+
+
 
     def register_path(self, service, path, value=None, writeable=False, unit=None, description=None):
         
@@ -1164,59 +1173,49 @@ class XantrexService:
             st["seq"] += 1
             st["need"] -= 1
             st["deadline"] = time.monotonic() + 2.0
+              
+            try
+                # Finished this BAM?
+                if st["need"] == 0:
+                    payload = bytes(st["buf"])[: st["len"]]  # trim to announced len
+                    pgn     = st["pgn"]
+                    del self.multiframe_assemblies[src]
 
-            # Finished this BAM?
-            if st["need"] == 0:
-                payload = bytes(st["buf"])[: st["len"]]  # trim to announced len
-                pgn     = st["pgn"]
-                del self.multiframe_assemblies[src]
 
+                    txt_raw = payload.decode("ascii", "ignore").strip("\x00 ").strip()
+                    txt_up  = txt_raw.upper() 
 
-                txt_raw = payload.decode("ascii", "ignore").strip("\x00 ").strip()
-                txt_up  = txt_raw.upper() 
-
-                # sanitize non-printables for log visibility 
-                assembled_txt = ''.join(ch if 32 <= ord(ch) < 127 else '.' for ch in txt_raw)                
+                    # sanitize non-printables for log visibility 
+                    assembled_txt = ''.join(ch if 32 <= ord(ch) < 127 else '.' for ch in txt_raw)                
                 
-                if "XANTREX" in txt_up:
-                    if src not in self.xantrex_sources:
-                        # mark SA as Xantrex 
-                        self.xantrex_sources[src] = 129   #  inverter / charger
+                    if "XANTREX" in txt_up:
+                        if src not in self.xantrex_sources:
+                            # mark SA as Xantrex 
+                            self.xantrex_sources[src] = 129   #  inverter / charger
                         
-                    #  we hard code the version to the latest.  If and when the dgn comes in, set the path correctly    
-                    FIRMWARE_VERSION = re.search(r'U3:0*([0-9]{1,2}\.[0-9]{2})', assembled_txt)
-                    if FIRMWARE_VERSION != None:
-                        self._InverterService['/FirmwareVersion'] = FIRMWARE_VERSION   
-                        self._ChargerService['/FirmwareVersion']  = FIRMWARE_VERSION   
+                        #  we hard code the version to the latest.  If and when the dgn comes in, set the path correctly    
+                        FIRMWARE_VERSION = re.search(r'U3:0*([0-9]{1,2}\.[0-9]{2})', assembled_txt)
+                        if FIRMWARE_VERSION is not None:
+                            self._InverterService['/FirmwareVersion'] = FIRMWARE_VERSION   
+                            self._ChargerService['/FirmwareVersion']  = FIRMWARE_VERSION   
                     
-                    logger.info(f"[{self.frame_count:06}] [MULTI FRAME PROCESSOR DONE] SA=0x{src:02X} | DGN=0x{dgn:05X} | PGN=0x{pgn:06X} | BYTES={len(payload)} | ASSEMBLED={assembled_txt} | NAME=XANTREX")
-                else:
-                    # classify as not Xantrex
-                    self.SA_toSkip.add(src)
-                    logger.info(f"[{self.frame_count:06}] [MULTI FRAME PROCESSOR DONE] SA=0x{src:02X} | DGN=0x{dgn:05X} | PGN=0x{pgn:06X} | BYTES={len(payload)} | ASSEMBLED={assembled_txt} | NAME=OTHER → SA_toSkip")
+                        logger.info(f"[{self.frame_count:06}] [MULTI FRAME PROCESSOR DONE] SA=0x{src:02X} | DGN=0x{dgn:05X} | PGN=0x{pgn:06X} | BYTES={len(payload)} | ASSEMBLED={assembled_txt} | NAME=XANTREX")
+                    else:
+                        # classify as not Xantrex
+                        self.SA_toSkip.add(src)
+                        logger.info(f"[{self.frame_count:06}] [MULTI FRAME PROCESSOR DONE] SA=0x{src:02X} | DGN=0x{dgn:05X} | PGN=0x{pgn:06X} | BYTES={len(payload)} | ASSEMBLED={assembled_txt} | NAME=OTHER → SA_toSkip")
+                        
+            except Exception as e:    
+                if self.debug:
+                    logger.exception(f"[{self.frame_count:06}] [ASSEMBLED FAIL ] PGN=0x{getattr(self,'last_dgn',0):05X} SA=0x{getattr(self,'last_src',0):02X} {dst_path} – {e}")
 
+            
 
             return True
 
         # Not a Multi Frame PGN
         return False
-
-
-    def state_is_assisting(self):
-        grid_current    = self._InverterService['/Ac/Grid/L1/I']
-        battery_current = self._InverterService['/Dc/0/Current']
-
-        # only emit “Assisting” when the grid is present AND battery is discharging (< 0 A)
-        if grid_current and battery_current is not None and  battery_current < 0:
-            self._InverterService['/State'] = 10   # venus os assisting value
-
-    def state_is_passthru(self):
-        passthrough_is = self._ChargerService['/Ac/PassThrough/Active']
-        if passthrough_is is not None:
-            if bool(passthrough_is.value):
-                self._ChargerService['/State'] = 8
-            return
-         
+ 
 
     # Process a single incoming CAN frame, decode its RV-C data, and update D-Bus paths.
     # Args:
@@ -1304,19 +1303,24 @@ class XantrexService:
                     if self.xantrex_sources and (src not in self.xantrex_sources):
                         logger.info(f"[{self.frame_count:06}] [CAN ID - SOURCE SKIPPED] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} DATA=[{data.hex(' ').upper()}]")
                         return True
-                        
+       
+            self.isthereaframe = 1    # set this to know the unit is on vs off, this will catch if it is turned off.
+            
             logger.debug(f"[{self.frame_count:06}] [CAN ID] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} DATA=[{data.hex(' ').upper()}]")
             if dgn in (0x0ECFF, 0x0EBFF):
                 if self.process_multiFrames(dgn, src, data):
                     return True # consumed
            
             # a charger value but if the volts is 0 throw the complete frame away    
-            if dgn == 0x1FFCA:   
+            elif dgn == 0x1FFCA:   
                 v = safe_u16(data, 1, 0.05)   # AC In L1 Voltage
                 if v is None  or v <= 90:  #  when is is not charging the voltage is 0 but let's expand the capture
-                    logger.info(f"[{self.frame_count:06}] [CAN ID - FFCA SKIPPED] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} DATA=[{data.hex(' ').upper()}]")                    
+                    logger.info(f"[{self.frame_count:06}] [CAN ID - FFCA SKIPPED/BAD VOLTAGE] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} VOLTAGE={v}  DATA=[{data.hex(' ').upper()}]")                    
                     return True # consumed
-
+            elif dgn == 0x1FFC7:   #  skip setting the state from this dgn if no voltage in.
+                if (self._ChargerService['/Ac/In/L1/V'] or 0) == 0:
+                    logger.info(f"[{self.frame_count:06}] [CAN ID - FFC7 SKIPPED/NO VOLTAGE] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} DATA=[{data.hex(' ').upper()}]")                                        
+                    return True # consumed
 
             
         except (OSError, ValueError) as e:
@@ -1392,25 +1396,23 @@ class XantrexService:
                 # special odd handling, I have not come up with a cleaner way to deal with.  
                         
                
+                # No longer doing this comment it out.        
                 # Only accept inverter status (FFD4) from D0 → skip everything else  Do not like to hard code this...
                 # FFD4 seems to be correct for inverter only when it comes from source D0 I hate to hard code this, but xantrex does not respond when I ask 
-                if dgn == 0x1FFD4:
-                    # Only allow inverter status from D0 → inverter service
-                    if src == 0xD0 and service is self._InverterService:      # this gives us the correct /State value   Only for the inverter
-                        pass  # allowed    we may want this to send to charger service if 42 or another source, but for now we do this.
-                        
-                    else:    
-                        continue  # skip everything else for FFD4
-
-                    
-                if dgn == 0x1FFD7:
-                    # Only allow frequency paths from D0
-                    if src == 0xD0 and path in ('/Ac/Out/L1/F', '/Ac/Out/F'):   # frequencey from 42 is not correct, but it is good from d0 so
-                        pass  # allowed
-                    elif src == self.primary_source and path not in ('/Ac/Out/L1/F', '/Ac/Out/F'):   
-                        pass  # allowed
-                    else:
-                        continue  # skip
+                #if dgn == 0x1FFD4:
+                #    # Only allow inverter status from D0 → inverter service
+                #    if src == 0xD0 and service is self._InverterService:      # this gives us the correct /State value   Only for the inverter
+                #        pass  # allowed    we may want this to send to charger service if 42 or another source, but for now we do this.
+                #    else:    
+                #        continue  # skip everything else for FFD4
+                #if dgn == 0x1FFD7:
+                #    # Only allow frequency paths from D0
+                #    if src == 0xD0 and path in ('/Ac/Out/L1/F', '/Ac/Out/F'):   # frequencey from 42 is not correct, but it is good from d0 so
+                #        pass  # allowed
+                #    elif src == self.primary_source and path not in ('/Ac/Out/L1/F', '/Ac/Out/F'):   
+                #        pass  # allowed
+                #    else:
+                #        continue  # skip
                 
                     
                 try:
@@ -1449,22 +1451,10 @@ class XantrexService:
 
             self.update_derived_values()  
 
-        # increment a different frame counter to trigger and run state checks every 60 frames (~5s)
-        self._frame_counter += 1
-        if self._frame_counter >= 65:   # about 5s on my pi  Use a counter just to be easier 
-            try:
-                logger.info(f"[{self.frame_count:06}] [FRAME STATE CHECK] Running /State derivations")
-                self.state_is_passthru()
-                self.state_is_assisting()
-            except Exception as e:
-                logger.error(f"[{self.frame_count:06}] [FRAME STATE ERROR] Running /State derivations Error: %s", e)
-            # reset counter
-            self._frame_counter = 0
-
         return True
 
 
-    def start_heartbeat(self, interval=5):
+    def start_heartbeat(self, interval=5):   # set the default to 5 s if not passed
         def sync_mode_from_status(self):
             inverter_service = self._InverterService
             MODE_ON, MODE_OFF = 3, 4
@@ -1487,12 +1477,71 @@ class XantrexService:
                     logger.warning("[SET MODE ERROR] sync_mode_from_status: forcing Off (%s)", error)
                     
                 return False
+ 
+        def set_status(self):
+            def check_path(value, default=0):
+                return default if value is None else value
+
+            inverter_service = self._InverterService
+            charger_service  = self._ChargerService
+
+
+            if self.isthereaframe == 1:   # so we have a frame, which means the unit is on.
+                self.isthereaframe = 0   #  reset the flag
+
+                grid_current    = check_path( inverter_service['/Ac/Grid/L1/I'] )
+                battery_current = check_path( inverter_service['/Dc/0/Current'] )
+                ac_current_out  = check_path( inverter_service['/Ac/Out/L1/I'] )    # assume this is set only when inverting
+                ac_volts_out    = check_path( inverter_service['/Ac/Out/L1/V'] )    # the volts can be out, but no current drawing 
+                ac_volts_in     = check_path( charger_service['/Ac/In/L1/V'] )
+                #passthrough_is  = check_path( charger_service['/Ac/PassThrough/Active'] )  #  not sure about this.  could be chicken or the egg  assuming the frames do not set this.
+
+                logger.debug(
+                    f"[{self.frame_count:06}] [SET STATE] "
+                    f"grid_I={grid_current:.2f}A, batt_I={battery_current:.2f}A, "
+                    f"ac_out_I={ac_current_out:.2f}A, ac_out_V={ac_volts_out:.1f}V, "
+                    f"ac_in_V={ac_volts_in:.1f}V, "
+                    f"inv_state={int(check_path(inverter_service['/State']))}, "
+                    f"chg_state={int(check_path(charger_service['/State']))}"
+)
+
+                # ---------------- CHARGER /State ----------------
+                # Leave non-zero state alone; only set when currently Off (0) assuming it will be set by a frame
+                if check_path( charger_service['/State']) == 0:   # off  Do not trust it when not set, but if it is, leave it be assuming it came from a good frame.                
+                    if ac_volts_in  > 0:  # incoming volts
+                        charger_service['/State']  = 3   # float just a default  probably not correct, need more data???  
+                    else:
+                        charger_service['/State'] = 0
+                
+                # ---------------- INVERTER /State ----------------                
+                # check the inverter paths to set it's /State
+                #if check_path( inverter_service['/State']) == 0:   # off  Do not trust it when not set, but if it is, leave it be assuming it came from a good frame.
+
+                # Assist (10): shore present AND battery is discharging
+                if grid_current and battery_current is not None and  battery_current < 0:
+                    inverter_service['/State'] = 10   # venus os assisting value
+
+                elif ac_volts_in == 0 and ac_current_out > 0:
+                    inverter_service['/State'] = 9  # Inverting
+                    
+                elif ac_volts_out > 0:   # no current but voltage    
+                    inverter_service['/State'] = 1   # standby
+                       
+                elif ac_volts_in > 0:   
+                    inverter_service['/State'] = 8   # pass-through
+    
+
+            else:   # the unit is off
+                inverter_service['/State'] = 0   # No frame, so show off.
+                charger_service['/State']  = 0                
+  
+            return True    
         
         def _publish_heartbeat():
-            """
-            Inner function that runs in the background thread and updates
-            the last_heartbeat timestamp and the ProcessAlive D-Bus path.
-            """
+            
+            # Inner function that runs in the background thread and updates
+            # the last_heartbeat timestamp and the ProcessAlive D-Bus path.
+            
             try:
                 # Record the current timestamp for heartbeat tracking
                 self.last_heartbeat     = time.time()
@@ -1508,12 +1557,16 @@ class XantrexService:
                 # Charger heartbeat updates
                 self._ChargerService['/Mgmt/ProcessAlive']       = self.heartbeat_counter
                 self._ChargerService['/Mgmt/LastUpdate']         = self.last_heartbeat
+                
+
 
                 # Optionally log the heartbeat timestamp if verbose/debug is enabled
                 logger.info(f"[HEARTBEAT] {self.last_heartbeat}")
                 
                 # check /Status to set  /mode  rv-c from xantrex does not send it.
+                set_status(self)
                 sync_mode_from_status(self)
+
 
             except Exception as e:
                 logger.error(f"[HEARTBEAT ERROR] {e}")                    
@@ -1593,7 +1646,7 @@ def main():
 
         # Start the background thread that periodically updates ProcessAlive
         #service.start_heartbeat_thread()
-        service.start_heartbeat(5)
+        service.start_heartbeat(1)
 
 
         # Enter the main loop (non-blocking events will be handled here)
