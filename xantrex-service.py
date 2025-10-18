@@ -1174,7 +1174,7 @@ class XantrexService:
             st["need"] -= 1
             st["deadline"] = time.monotonic() + 2.0
               
-            try
+            try:
                 # Finished this BAM?
                 if st["need"] == 0:
                     payload = bytes(st["buf"])[: st["len"]]  # trim to announced len
@@ -1209,7 +1209,7 @@ class XantrexService:
 
                         temp = re.search(r'U3:0*([0-9]{1,2}\.[0-9]{2})', assembled_txt)
                         if temp is not None:
-                            FIRMWARE_VERSION = = temp.group(1)
+                            FIRMWARE_VERSION = temp.group(1)
                             self._InverterService['/FirmwareVersion'] = FIRMWARE_VERSION   
                             self._ChargerService['/FirmwareVersion']  = FIRMWARE_VERSION   
                     
@@ -1679,4 +1679,5 @@ def main():
 
 
 if __name__ == '__main__':
+
     main()
