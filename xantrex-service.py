@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Version: 2.1.766.2025.09.19
-# Date: 2025-09-19
+# Version: 2.1.769.2025.10.18
+# Date: 2025-10-18
 
 # Xantrex Freedom Pro RV-C D-Bus Driver
 #
@@ -90,8 +90,8 @@ RVC_INV_STATE = {
     0: 0,  # Not Available → Off
     1: 1,  # Stand-by → AES mode
     2: 9,  # Active → Inverting
-    3: 0,  # Disabled → Off
-    4: 4,  # Start-Inhibit → Absorption (best fit)
+    3: 8,  # Pass thru
+    4: 1,  # Start-Inhibit
     5: 2,  # Overload → Fault
     6: 2,  # Short-Circuit → Fault
     7: 2,  # Over-Temperature → Fault
@@ -102,13 +102,13 @@ RVC_INV_STATE = {
 }
 
 RVC_CHG_STATE = {
-    0: 0,   # 0 NA/init       → Off
-    1: 3,   # 1 Bulk          → Bulk
-    2: 4,   # 2 Absorption    → Absorption
-    3: 5,   # 3 Float         → Float
-    4: 7,   # 4 Equalise      → Equalize
-    5: 6,   # 5 Storage       → Storage
-    6: 2,   # 6 Fault         → Fault
+    0: 0,   #  NA/init       → Off
+    1: 0,   #  Not charging
+    2: 3,   #  Bulk
+    3: 4,   #  Absorption
+    4: 4,   #  Absorption
+    5: 7,   #  Equalize
+    6: 5,   #  Float
     # RV-C never sends 7–15, but Venus supports 8–11:
     8: 8,   #   — passthru     → Passthru
     9: 9,   #   — inverting    → Inverting
@@ -1174,7 +1174,7 @@ class XantrexService:
             st["need"] -= 1
             st["deadline"] = time.monotonic() + 2.0
               
-            try
+            try:
                 # Finished this BAM?
                 if st["need"] == 0:
                     payload = bytes(st["buf"])[: st["len"]]  # trim to announced len
@@ -1209,7 +1209,7 @@ class XantrexService:
 
                         temp = re.search(r'U3:0*([0-9]{1,2}\.[0-9]{2})', assembled_txt)
                         if temp is not None:
-                            FIRMWARE_VERSION = = temp.group(1)
+                            FIRMWARE_VERSION = temp.group(1)
                             self._InverterService['/FirmwareVersion'] = FIRMWARE_VERSION   
                             self._ChargerService['/FirmwareVersion']  = FIRMWARE_VERSION   
                     
