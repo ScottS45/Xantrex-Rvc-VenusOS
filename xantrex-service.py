@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Version: 2.1.769.2025.10.18
-# Date: 2025-10-18
+# Version: 2.1.776.2025.10.24
+# Date: 2025-10-24
 
 # Xantrex Freedom Pro RV-C D-Bus Driver
 #
@@ -413,7 +413,7 @@ INVERTER_DGN_MAP = {
     ],
     0x1FEE8: [  # INVERTER_DC_STATUS
         ('/Dc/0/Voltage',              lambda d: safe_u16(d, 1, 0.05, 'little'), 'V',     'DC 0 Voltage'),
-        ('/Dc/0/Current',              lambda d: safe_s16(d, 2, 0.02, 'big'),    'A',     'DC 0 Current'),
+        ('/Dc/0/Current',              lambda d: safe_u8( d, 3, 0.05),           'A',     'DC 0 Current'),
     ],
     0x1FEBE: [  # INVERTER_LOAD_PRIORITY
         ('/Settings/InputPriority',    lambda d: safe_u8(d, 0),                  '',      'Input Priority'),
@@ -604,15 +604,15 @@ COMMON_DGN_MAP = {
     ],
     0x1FFCA: [  # CHARGER_AC_STATUS_1
         ('/Ac/In/L1/V',              lambda d: safe_u16(d, 1, 0.05),             'V',     'AC Input L1 Voltage'),
-        ('/Ac/In/L1/I',              lambda d: safe_u16(d, 4, 0.1),              'A',     'AC Input L1 Current'),
+        ('/Ac/In/L1/I',              lambda d: safe_u8(d, 3, 0.05),              'A',     'AC Input L1 Current'),
         ('/Ac/In/L1/P',              lambda d: (None
                                                if safe_u16(d, 1, 0.05) is None
                                                or safe_u16(d, 4, 0.1) is None
                                                else round(safe_u16(d, 1, 0.05) * safe_u16(d, 4, 0.1), 1)),
                                                                                  'W',     'AC Input L1 Power'),
         ('/Ac/ActiveIn/L1/V',        lambda d: safe_u16(d, 1, 0.05),             'V',     'Active AC Input L1 Voltage'),
-        ('/Ac/ActiveIn/L1/I',        lambda d: safe_u16(d, 4, 0.1),              'A',     'Active AC Input L1 Current'),
-        ('/Ac/ActiveIn/L1/P',       lambda d: (None
+        ('/Ac/ActiveIn/L1/I',        lambda d: safe_u8(d, 3, 0.05),              'A',     'Active AC Input L1 Current'),
+        ('/Ac/ActiveIn/L1/P',        lambda d: (None
                                                if safe_u16(d, 1, 0.05) is None
                                                or safe_u16(d, 4, 0.1) is None
                                                else round(safe_u16(d, 1, 0.05) * safe_u16(d, 4, 0.1), 1)),
@@ -918,6 +918,9 @@ class XantrexService:
 
         self.register_path(self._InverterService, '/Ac/Out/Total/P', 0.0,                                 writeable=False, unit='W', description='Total Active Power')
         self.register_path(self._InverterService, '/Ac/Out/Total/I', 0.0,                                 writeable=False, unit='A', description='Total Current')
+
+        self.register_path(self._InverterService, '/Ac/Grid/P',     None,                                 writeable=False, unit='W', description='Grid total active power (alias of /Ac/In/P)')
+        self.register_path(self._InverterService, '/Ac/Grid/I',     None,                                 writeable=False, unit='A', description='Grid total current (alias of /Ac/In/I)')
 
         mode_item = self.register_path(self._InverterService, '/Mode',                 4, writeable = False,    unit = '',  description = 'Inverter Mode - Venus OS Switch?')   # “On” (normal/auto, charger + inverter available)
         # Give it a text mapper so GUI shows "On"/"Off" instead of 3/4
