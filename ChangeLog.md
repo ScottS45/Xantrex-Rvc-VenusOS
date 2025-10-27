@@ -8,7 +8,7 @@
 - Improved the setting of the inverter /State  (FFD4)
   - Commented out the manually calculating, and switched back to FFD4, after finding was off a byte. 
   - Still use some code to better show stand by as it seem to show invertering even when not.
-- Improved the setting of the charger /State (FFC7)
+- Improved the setting of the charger /State (FFC7).  Correcting the decoder.
 - Switched more decoders to u8 vs u16 
 - Still left the set_state function as it helps show off, when the unit is turned off
 
