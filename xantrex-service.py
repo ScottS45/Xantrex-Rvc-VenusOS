@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Version: 2.1.803.2025.10.25
-# Date: 2025-10-25
+# Version: 2.1.816.2025.10.27
+# Date: 2025-10-27
 
 # Xantrex Freedom Pro RV-C D-Bus Driver
 #
@@ -367,7 +367,13 @@ INVERTER_DGN_MAP = {
         ('/Ac/Out/I',                  lambda d: safe_u8(d,  3, 0.1),            'A',     'AC Output L1 Current'),
         ('/Ac/Out/F',                  lambda d: safe_u16(d, 5, 2.0, 'big'),     'Hz',    'AC Output Frequency'),
     ],
-     0x1FEA2: [  # INVERTER_STATUS_2 (DC Input Voltage & Current)
+    0x1FEE8: [  # INVERTER_DC_STATUS
+        ('/Dc/0/Voltage',              lambda d: safe_u16(d, 1, 0.05, 'little'), 'V',     'DC 0 Voltage'),
+        ('/Dc/0/Current',              lambda d: safe_u8( d, 3, 0.05, 'little'), 'A',     'DC 0 Current'),
+        ('/Dc/Voltage',                lambda d: safe_u16(d, 1, 0.05, 'little'), 'V',     'DC 0 Voltage'),
+        ('/Dc/Current',                lambda d: safe_u8( d, 3, 0.05, 'little'), 'A',     'DC 0 Current'),
+    ],
+    0x1FEA2: [  # INVERTER_STATUS_2 (DC Input Voltage & Current)
         ('/Dc/0/Voltage',              lambda d: safe_u16(d, 2, 0.05),           'V',     'DC Input Voltage'),
         ('/Dc/0/Current',              lambda d: safe_u16(d, 4, 0.01),           'A',     'DC Input Current'),
     ],
@@ -409,10 +415,6 @@ INVERTER_DGN_MAP = {
         ('/Ac/Out/Total/Q',            lambda d: safe_s16(d, 2, 1.0),            'VAR',   'Total Reactive Power'),
         ('/Ac/Out/Total/S',            lambda d: safe_u16(d, 4, 1.0),            'VA',    'Total Apparent Power'),
         ('/Ac/Out/Total/PowerFactor',  lambda d: safe_s16(d, 6, 0.001),          '',      'Power Factor'),
-    ],
-    0x1FEE8: [  # INVERTER_DC_STATUS
-        ('/Dc/0/Voltage',              lambda d: safe_u16(d, 1, 0.05, 'little'), 'V',     'DC 0 Voltage'),
-        ('/Dc/0/Current',              lambda d: safe_u8( d, 3, 0.05),           'A',     'DC 0 Current'),
     ],
     0x1FEBE: [  # INVERTER_LOAD_PRIORITY
         ('/Settings/InputPriority',    lambda d: safe_u8(d, 0),                  '',      'Input Priority'),
@@ -471,10 +473,14 @@ CHARGER_DGN_MAP = {
     0x1FFC7: [  # CHARGER_STATUS
         ('/TargetVoltage',           lambda d: safe_u16(d, 1, 0.05, 'little'),   'V',     'Charge control voltage (target)'),
         ('/TargetCurrent',           lambda d: safe_u16(d, 3, 0.05, 'big'),      'A',     'Charge control current (target)'),
+        ('/Dc/0/Voltage',            lambda d: safe_u16(d, 1, 0.05, 'little'),   'V',     'Battery Voltage'),
+        ('/Dc/0/Current',            lambda d: safe_u16(d, 3, 0.05, 'big'),      'A',     'Battery Charge Current'),
+        ('/Battery/Voltage',         lambda d: safe_u16(d, 1, 0.05, 'little'),   'V',     'Battery Voltage'),
+        ('/Battery/Current',         lambda d: safe_u16(d, 3, 0.05, 'big'),      'A',     'Battery Charge Current'),
         ('/Dc/0/PowerPercent',       lambda d: safe_u8( d, 5),                   '%',     'Charge current as % of maximum'),
         ('/State',                   lambda d: RVC_CHG_STATE.get(int(safe_u8(d, 6) or 0), 0), '', 'Charger operating state'),
     ],
-    0x1FEA3: [  # CHARGER_STATUS_2 (Battery Voltage & Current)
+    0x1FEA3: [  # CHARGER_STATUS_2 (Battery Voltage & Current)   # this only seems to come in on source 25, which we skip since it is not a xantrex source but victron
         ('/Dc/0/Voltage',            lambda d: safe_u16(d, 2, 0.05),             'V',     'Battery Voltage'),
         ('/Dc/0/Current',            lambda d: safe_u16(d, 4, 0.05),             'A',     'Battery Charge Current'),
         ('/Dc/0/Temperature',        lambda d: safe_s8(d, 6),                    '°C',    'Charger Temperature'),        
@@ -594,7 +600,7 @@ COMMON_DGN_MAP = {
         ('/Ac/Grid/PhaseAlignment',                 lambda d: safe_u8(d, 1),        '',      'Phase Match Indicator'),
         ('/Ac/Grid/FaultFlags',                     lambda d: safe_u8(d, 2),        '',      'Grid Fault Flags'),
     ],
-    0x1FFFD: [  # DC Source Status 1  
+    0x1FFFD: [  # DC Source Status 1    # never see this one
         ('/Dc/0/Instance',                          lambda d: safe_u8(d, 0),        '',      'DC Source Instance'),
         ('/Dc/0/DevicePriority',                    lambda d: safe_u8(d, 1),        '',      'DC Source Device Priority'),
         ('/Dc/0/Voltage',                           lambda d: safe_u16(d, 2, 0.05), 'V',     'DC Source Voltage'),
@@ -617,6 +623,19 @@ COMMON_DGN_MAP = {
                                                else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
                                                                                     'W',     'Active AC Input L1 Power'),
         ('/Ac/ActiveIn/L1/F',        lambda d: safe_u16(d, 5, 1/128.0),             'Hz',    'Active AC Input L1 Frequency'), 
+        ('/Ac/In/V',                 lambda d: safe_u16(d, 1, 0.05),                'V',     'AC Input Voltage (total)'),
+        ('/Ac/In/I',                 lambda d: safe_u8( d, 3, 0.05),                'A',     'AC Input Current (total)'),
+        ('/Ac/In/Power',             lambda d: (None
+                                            if safe_u16(d, 1, 0.05) is None
+                                            or safe_u8( d, 3, 0.05) is None
+                                            else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
+                                                                                    'W',     'AC Input Power (total, apparent)'),
+        ('/Ac/In/F',                 lambda d: safe_u16(d, 5, 1/128.0),             'Hz',    'AC Input Frequency (total)'),
+        ('/Ac/ActiveIn/Power',       lambda d: (None
+                                            if safe_u16(d, 1, 0.05) is None
+                                            or safe_u8( d, 3, 0.05) is None
+                                            else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
+                                                                             'W',  'Active AC Input Power (total, apparent)'),
         ('/Ac/ActiveIn/Connected',   lambda d: (1 if (safe_u16(d, 1, 0.05) or 0) > 85.0 else 0), '',   'Active AC Input present'),
     ],    
     0x1FDA0: [  # DC_SOURCE_LOAD_CONTROL
@@ -648,6 +667,7 @@ COMMON_DGN_MAP = {
 
 
 # DGNs required for derived power calculations
+# Only see FFCA and FEE8 in the logs so far.
 DERIVED_DGNS = {
     0x1FFD6,  # AC-Out RMS (V, F)            – ensures /Ac/Out/V,F are fresh
     0x1FFDD,  # AC-Out power summary         – total P, Q, S, PF
@@ -898,7 +918,6 @@ class XantrexService:
         # ────────────────────────────────────────────────────────────────
         # Register derived D-Bus paths on inverter service (per line)
         # ────────────────────────────────────────────────────────────────
-        self.register_path(self._InverterService, '/Dc/0/Power',           None, writeable = False, unit = 'W', description = 'DC Power Bank 0')
         self.register_path(self._InverterService, '/Ac/In/L1/Power',       None, writeable = False, unit = 'W', description = 'AC Input L1 Power')
         self.register_path(self._InverterService, '/Ac/ActiveIn/L1/P',     None, writeable = False, unit = 'W', description = 'AC Active Input L1 Power')
         self.register_path(self._InverterService, '/Ac/Out/L1/P',          None, writeable = False, unit = 'W', description = 'AC Output L1 Power')
@@ -908,6 +927,18 @@ class XantrexService:
         self.register_path(self._InverterService, '/Ac/Out/I',             None, writeable = False, unit = 'A', description = 'Total AC Output Current')        
         self.register_path(self._InverterService, '/System/Ac/P',          None, writeable = False, unit = 'W', description = 'System AC Power')
         self.register_path(self._InverterService, '/System/Ac/I',          None, writeable = False, unit='A',   description = 'System AC Current')
+
+        # since we are Xantrex only L1 is supported, so I hardcoded these.  
+        self.register_path(self._InverterService, '/Ac/NumberOfInputs',        1,                         writeable=False, unit='', description='Number of AC Inputs')
+        self.register_path(self._InverterService, '/Ac/ActiveIn/ActiveInput',  0,                         writeable=False, unit='', description='Active AC Input index')
+        self.register_path(self._InverterService, '/Ac/ActiveIn/Source',       2,                         writeable=False, unit='', description='AC Input Source (0=Grid,1=Generator,2=Shore)')
+
+        self.register_path(self._InverterService, '/Dc/0/Power',               None,                      writeable = False, unit = 'W', description = 'DC Power Bank 0')
+        self.register_path(self._InverterService, '/Dc/Power',                 None,                      writeable = False, unit = 'W', description = 'DC Power ')        
+        self.register_path(self._InverterService, '/Dc/Instance',              0,                         writeable = False, unit = 'W', description = 'DC Power ')        
+        self.register_path(self._ChargerService,  '/Dc/0/Power',               None,                      writeable = False, unit = 'W', description = 'DC Power Bank 0')
+        self.register_path(self._ChargerService,  '/Dc/Power',                 None,                      writeable = False, unit = 'W', description = 'DC Power ')        
+        self.register_path(self._ChargerService,  '/Dc/Instance',              0,                         writeable = False, unit = 'W', description = 'DC Power ')        
 
         self.register_path(self._InverterService, '/CustomName',     'XC Pro 3000 (Inverter)',            writeable=False, unit='',  description='Display device name in GUI.')
         self.register_path(self._ChargerService,  '/CustomName',     'XC Pro 3000 (Charger)',             writeable=False, unit='',  description='Display device name in GUI.')
@@ -1077,7 +1108,7 @@ class XantrexService:
                 v_item = self._InverterService[f"{base_path}/L1/V"]
                 c_item = self._InverterService[f"{base_path}/L1/I"]
 
-                if v_item is None or c_item is None or v_item == 0.0 or c_item == 0.0:
+                if v_item is None or c_item is None:   #or v_item == 0.0 or c_item == 0.0:   Allow 0 to be displayed
                     return
 
                 # Aggregate; Freedom XC has only one phase
@@ -1104,9 +1135,11 @@ class XantrexService:
 
         # Individual power paths (DC & AC) – single-phase Freedom XC
         compute_power('/Dc/0/Power',       '/Dc/0/Voltage',     '/Dc/0/Current')
+        compute_power('/Dc/Power',         '/Dc/0/Voltage',     '/Dc/0/Current')        
 
-        compute_power('/Ac/In/L1/P',       '/Ac/In/L1/V',       '/Ac/In/L1/I')
-        compute_power('/Ac/ActiveIn/L1/P', '/Ac/ActiveIn/L1/V', '/Ac/ActiveIn/L1/I')
+        # these are in the decoder blocks, a bit more efficient maybe.
+        #compute_power('/Ac/In/L1/P',       '/Ac/In/L1/V',       '/Ac/In/L1/I')
+        #compute_power('/Ac/ActiveIn/L1/P', '/Ac/ActiveIn/L1/V', '/Ac/ActiveIn/L1/I')
         #compute_power('/Ac/Out/L1/P',      '/Ac/Out/L1/V',      '/Ac/Out/L1/I')
 
         # Totals + aliases  (/Ac/In → /Ac/Grid ,  /Ac/Out → /System/Ac)

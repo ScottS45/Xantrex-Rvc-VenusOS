@@ -1,5 +1,15 @@
 ## Changelog
 
+
+### Oct 27, 2025 (2)
+- Add additional paths for FFCA to help fill in missing AC IN data.
+- Add additional paths for FFC7 to help fill in missing DC info when charging.
+- Add additional paths for FEE8 to help fill in missing DC info when charging.
+- Register newly add paths
+- Allow 0 in Compute totals
+- Add computer power for new paths
+- Add various comments 
+
 ### Oct 27, 2025
  #### *** NOTE: The previous safe_u8 fix for current (I), will not handle higher amps.  u8 is only reads one byte, 8 bits.  That gives a numerical range of 0–255.  The raw max integer is 0xFF = 255.  Multiply that by the scale of 0.05 A/bit	≈ 12.75 A.  ***
 
