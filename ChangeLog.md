@@ -1,7 +1,7 @@
 ## Changelog
 
 ### Oct 27, 2025
- #### *** NOTE: The previous safe_u8 fix for current (I), will not handle higher amps.  u8 is only reading one byte, 8 bits.  That gives a numerical range of 0–255.  The raw max integer is 0xFF = 255.  Multiply that by the scale of 0.05 A/bit	≈ 12.75 A.  ***
+ #### *** NOTE: The previous safe_u8 fix for current (I), will not handle higher amps.  u8 is only reads one byte, 8 bits.  That gives a numerical range of 0–255.  The raw max integer is 0xFF = 255.  Multiply that by the scale of 0.05 A/bit	≈ 12.75 A.  ***
 
 
 ### Oct 25, 2025
