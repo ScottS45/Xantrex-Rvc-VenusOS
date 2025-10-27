@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Version: 2.1.776.2025.10.24
-# Date: 2025-10-24
+# Version: 2.1.803.2025.10.25
+# Date: 2025-10-25
 
 # Xantrex Freedom Pro RV-C D-Bus Driver
 #
@@ -88,11 +88,11 @@ MAX_UNMAPPED_DGNS   = 100
 # map raw RV-C codes → Venus OS GUI /State enum
 RVC_INV_STATE = {
     0: 0,  # Not Available → Off
-    1: 1,  # Stand-by → AES mode
-    2: 9,  # Active → Inverting
-    3: 8,  # Pass thru
-    4: 1,  # Start-Inhibit
-    5: 2,  # Overload → Fault
+    1: 9,  # Invert    -> Inverting  
+    2: 8,  # Pass thru
+    3: 11, # APS only  -> Power supply
+    4: 1,  # Load sense -> Standby/Idle
+    5: 1,  # Waiting to Invert -> Standby/Idle
     6: 2,  # Short-Circuit → Fault
     7: 2,  # Over-Temperature → Fault
     8: 2,  # Under-Voltage → Fault
@@ -103,13 +103,13 @@ RVC_INV_STATE = {
 
 RVC_CHG_STATE = {
     0: 0,   #  NA/init       → Off
-    1: 0,   #  Not charging
+    1: 0,   #  Not charging  Maybe this needs to be 1: 1
     2: 3,   #  Bulk
     3: 4,   #  Absorption
     4: 4,   #  Absorption
     5: 7,   #  Equalize
     6: 5,   #  Float
-    # RV-C never sends 7–15, but Venus supports 8–11:
+    # RV-C never sends 7–15, but Venus supports 8–11:  So I read, but never know so this is here anyways.
     8: 8,   #   — passthru     → Passthru
     9: 9,   #   — inverting    → Inverting
     10: 10, #   — assisting    → Assisting
@@ -333,9 +333,8 @@ def fahrenheit_to_c(val):
 # ─────────────────────────────────────────────────────────────────────────────
 INVERTER_DGN_MAP = {
     0x1FFD4: [  # INVERTER_STATUS              This is charger if the address is the primary *(0x42 default) or inverter if not that.
-        ('/StateNotCorrect',                        lambda d: RVC_INV_STATE.get((int(safe_u8(d, 0) or 0)) & 0x0F, 0),  '',  'Inverter operational state (0=Off,1=Standby,2=InvOnly,3=Bypass,4=Inv+Chg)'),
-        ('/Ac/Out/LoadPercent',                     lambda d: safe_u8(d, 1),        '%',     'Percent of rated output'),
-        # Bytes 3–7 are NA
+        ('/State',                     lambda d: RVC_INV_STATE.get((int(safe_u8(d, 1) or 0)) & 0x0F, 0),  '',  'Inverter operational state (0=Off,1=Standby,2=InvOnly,3=Bypass,4=Inv+Chg)'),
+         # Bytes 3–7 are NA
     ],
     0x1EE00: [  # ADDRESS_CLAIMED / NAME
         ('/Mgmt/ManufacturerCode',     lambda d: ((int.from_bytes(d[:8], 'little') >> 21) & 0x7FF) if len(d) >= 8 else None,  '', 'RV-C manufacturer code (119 = Xantrex)'),
@@ -355,10 +354,10 @@ INVERTER_DGN_MAP = {
         ('/Ac/In/F',                   lambda d: safe_u16(d, 2, 0.01),           'Hz',    'AC Input Frequency'),
         ('/Ac/In/L1/V',                lambda d: safe_u16(d, 0, 0.05),           'V',     'AC Input L1 Voltage (alias)'),
         ('/Ac/In/L1/F',                lambda d: safe_u16(d, 2, 0.01),           'Hz',    'AC Input L1 Frequency (alias)'),
-        ('/Ac/In/L1/I',                lambda d: safe_u16(d, 4, 0.1),            'A',     'AC Input L1 Current'),
+        ('/Ac/In/L1/I',                lambda d: safe_u8( d, 3, 0.05),           'A',     'AC Input L1 Current'),
         ('/Ac/Grid/L1/V',              lambda d: safe_u16(d, 0, 0.05),           'V',     'AC Input L1 Voltage (Grid)'),
-        ('/Ac/Grid/L1/I',              lambda d: safe_u16(d, 4, 0.1),            'A',     'AC Input L1 Current (Grid)'),
-        ('/Ac/Grid/L1/ApparentPower',  lambda d: (None if safe_u16(d, 0, 0.01) is None or safe_u16(d, 4, 0.01) is None else round(safe_u16(d, 0, 0.01) * safe_u16(d, 4, 0.01), 1)), 'VA', 'AC Input L1 Apparent Power (Grid)'),
+        ('/Ac/Grid/L1/I',              lambda d: safe_u8( d, 3, 0.05),           'A',     'AC Input L1 Current (Grid)'),
+        ('/Ac/Grid/L1/ApparentPower',  lambda d: (None if safe_u16(d, 0, 0.01) is None or safe_u8(d, 3, 0.05) is None else round(safe_u16(d, 0, 0.01) * safe_u8(d, 3, 0.05), 1)), 'VA', 'AC Input L1 Apparent Power (Grid)'),
     ],
     0x1FFD7: [  # INVERTER_AC_STATUS_1
         ('/Ac/Out/L1/V',               lambda d: safe_u16(d, 1, 0.05),           'V',     'AC Output L1 Voltage'),
@@ -470,11 +469,10 @@ CHARGER_DGN_MAP = {
         ('/Mode',                    lambda d: safe_u8(d, 0),                    '',      'Charger mode (standby)'),
     ],
     0x1FFC7: [  # CHARGER_STATUS
-        ('/State',                   lambda d: RVC_CHG_STATE.get((int(safe_u8(d, 0) or 0)) & 0x0F, 0),  '',      'Charger State'),
-        ('/Dc/0/PowerPercent',       lambda d: safe_u8(d, 2),                    '%',     'Charger Power Percent'),        
-        #('/Dc/0/Voltage',            lambda d: safe_u8(d, 0, 0.01),              'V',     'Charger Voltage'),
-        #('/Dc/0/Current',            lambda d: safe_u8(d, 1, 0.1),               'A',     'Charger Current'),
-
+        ('/TargetVoltage',           lambda d: safe_u16(d, 1, 0.05, 'little'),   'V',     'Charge control voltage (target)'),
+        ('/TargetCurrent',           lambda d: safe_u16(d, 3, 0.05, 'big'),      'A',     'Charge control current (target)'),
+        ('/Dc/0/PowerPercent',       lambda d: safe_u8( d, 5),                   '%',     'Charge current as % of maximum'),
+        ('/State',                   lambda d: RVC_CHG_STATE.get(int(safe_u8(d, 6) or 0), 0), '', 'Charger operating state'),
     ],
     0x1FEA3: [  # CHARGER_STATUS_2 (Battery Voltage & Current)
         ('/Dc/0/Voltage',            lambda d: safe_u16(d, 2, 0.05),             'V',     'Battery Voltage'),
@@ -549,9 +547,9 @@ CHARGER_DGN_MAP = {
         ('/Battery/Voltage',                lambda d: safe_u16(d, 4, 0.01) if d[0] == 0x01 else None,  'V',   'Battery Voltage'),
         ('/Battery/Current',                lambda d: safe_u16(d, 6, 0.1)  if d[0] == 0x01 else None,  'A',   'Battery Current'),
         ('/Battery/Power',                  lambda d: ( None if d[0] != 0x01 
-                                                               or safe_u16(d, 4, 0.01) is None 
+                                                               or safe_u8(d, 3, 0.05) is None 
                                                                or safe_s16(d, 6, 0.1) is None
-                                                             else round(safe_u16(d, 4, 0.01) * safe_s16(d, 6, 0.1), 1)),
+                                                             else round(safe_u8(d, 3, 0.05) * safe_s16(d, 6, 0.1), 1)),
                                                                                                        'W',   'Battery Power'),
         # APS variant (byte 0 == 0x02) – keep if you want the 12 V aux data
         ('/Dc/Aux/Instance',                lambda d: safe_u8(d, 0) if d[0] == 0x02 else None,         '',    'APS Instance'),
@@ -603,20 +601,23 @@ COMMON_DGN_MAP = {
         # DC Source Current  Expected on FEA3
     ],
     0x1FFCA: [  # CHARGER_AC_STATUS_1
-        ('/Ac/In/L1/V',              lambda d: safe_u16(d, 1, 0.05),             'V',     'AC Input L1 Voltage'),
-        ('/Ac/In/L1/I',              lambda d: safe_u8(d, 3, 0.05),              'A',     'AC Input L1 Current'),
+        ('/Ac/In/L1/V',              lambda d: safe_u16(d, 1, 0.05),                'V',     'AC Input L1 Voltage'),
+        ('/Ac/In/L1/I',              lambda d: safe_u8( d, 3, 0.05),                'A',     'AC Input L1 Current'),
         ('/Ac/In/L1/P',              lambda d: (None
                                                if safe_u16(d, 1, 0.05) is None
-                                               or safe_u16(d, 4, 0.1) is None
-                                               else round(safe_u16(d, 1, 0.05) * safe_u16(d, 4, 0.1), 1)),
-                                                                                 'W',     'AC Input L1 Power'),
-        ('/Ac/ActiveIn/L1/V',        lambda d: safe_u16(d, 1, 0.05),             'V',     'Active AC Input L1 Voltage'),
-        ('/Ac/ActiveIn/L1/I',        lambda d: safe_u8(d, 3, 0.05),              'A',     'Active AC Input L1 Current'),
+                                               or safe_u8( d, 3, 0.05) is None
+                                               else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
+                                                                                    'W',     'AC Input L1 Power'),
+        ('/Ac/In/L1/F',              lambda d: safe_u16(d, 5, 1/128.0),             'Hz',    'AC Input L1 Frequency'),                                                                        
+        ('/Ac/ActiveIn/L1/V',        lambda d: safe_u16(d, 1, 0.05),                'V',     'Active AC Input L1 Voltage'),
+        ('/Ac/ActiveIn/L1/I',        lambda d: safe_u8( d, 3, 0.05),                'A',     'Active AC Input L1 Current'),
         ('/Ac/ActiveIn/L1/P',        lambda d: (None
                                                if safe_u16(d, 1, 0.05) is None
-                                               or safe_u16(d, 4, 0.1) is None
-                                               else round(safe_u16(d, 1, 0.05) * safe_u16(d, 4, 0.1), 1)),
-                                                                                 'W',     'Active AC Input L1 Power'),
+                                               or safe_u8( d, 3, 0.05) is None
+                                               else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
+                                                                                    'W',     'Active AC Input L1 Power'),
+        ('/Ac/ActiveIn/L1/F',        lambda d: safe_u16(d, 5, 1/128.0),             'Hz',    'Active AC Input L1 Frequency'), 
+        ('/Ac/ActiveIn/Connected',   lambda d: (1 if (safe_u16(d, 1, 0.05) or 0) > 85.0 else 0), '',   'Active AC Input present'),
     ],    
     0x1FDA0: [  # DC_SOURCE_LOAD_CONTROL
         ('/Dc/Source/LoadControl/Status',           lambda d: safe_u8(d, 0),        '',      'Load Control Status'),
@@ -742,7 +743,7 @@ class VeDbusServiceWithMeta(vedbus.VeDbusService):
 # === D-Bus Service Class ===
 class XantrexService:
     def __init__(self, *, debug=False, verbose=False):
-        # Flags to control runtime logging behavior
+        # Flags to control runtime logging behaviour
         self.debug = debug
         self.verbose = verbose
 
@@ -1327,17 +1328,19 @@ class XantrexService:
             if dgn in (0x0ECFF, 0x0EBFF):
                 if self.process_multiFrames(dgn, src, data):
                     return True # consumed
-           
+
+            #******** comment out this skipping of the DGNs which we did to do manually setting of the /State to give our decoder changes a chance       *****
+
             # a charger value but if the volts is 0 throw the complete frame away    
-            elif dgn == 0x1FFCA:   
-                v = safe_u16(data, 1, 0.05)   # AC In L1 Voltage
-                if v is None  or v <= 90:  #  when is is not charging the voltage is 0 but let's expand the capture
-                    logger.info(f"[{self.frame_count:06}] [CAN ID - FFCA SKIPPED/BAD VOLTAGE] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} VOLTAGE={v}  DATA=[{data.hex(' ').upper()}]")                    
-                    return True # consumed
-            elif dgn == 0x1FFC7:   #  skip setting the state from this dgn if no voltage in.
-                if (self._ChargerService['/Ac/In/L1/V'] or 0) == 0:
-                    logger.info(f"[{self.frame_count:06}] [CAN ID - FFC7 SKIPPED/NO VOLTAGE] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} DATA=[{data.hex(' ').upper()}]")                                        
-                    return True # consumed
+            #elif dgn == 0x1FFCA:   
+            #    v = safe_u16(data, 1, 0.05)   # AC In L1 Voltage
+            #    if v is None  or v <= 90:  #  when is is not charging the voltage is 0 but let's expand the capture
+            #        logger.info(f"[{self.frame_count:06}] [CAN ID - FFCA SKIPPED/BAD VOLTAGE] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} VOLTAGE={v}  DATA=[{data.hex(' ').upper()}]")                    
+            #        return True # consumed
+            #elif dgn == 0x1FFC7:   #  skip setting the state from this dgn if no voltage in.
+            #    if (self._ChargerService['/Ac/In/L1/V'] or 0) == 0:
+            #        logger.info(f"[{self.frame_count:06}] [CAN ID - FFC7 SKIPPED/NO VOLTAGE] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} DATA=[{data.hex(' ').upper()}]")                                        
+            #        return True # consumed
 
             
         except (OSError, ValueError) as e:
@@ -1411,27 +1414,20 @@ class XantrexService:
                     continue
                     
                 # special odd handling, I have not come up with a cleaner way to deal with.  
-                        
-               
-                # No longer doing this comment it out.        
-                # Only accept inverter status (FFD4) from D0 → skip everything else  Do not like to hard code this...
-                # FFD4 seems to be correct for inverter only when it comes from source D0 I hate to hard code this, but xantrex does not respond when I ask 
-                #if dgn == 0x1FFD4:
-                #    # Only allow inverter status from D0 → inverter service
-                #    if src == 0xD0 and service is self._InverterService:      # this gives us the correct /State value   Only for the inverter
-                #        pass  # allowed    we may want this to send to charger service if 42 or another source, but for now we do this.
-                #    else:    
-                #        continue  # skip everything else for FFD4
-                #if dgn == 0x1FFD7:
-                #    # Only allow frequency paths from D0
-                #    if src == 0xD0 and path in ('/Ac/Out/L1/F', '/Ac/Out/F'):   # frequencey from 42 is not correct, but it is good from d0 so
-                #        pass  # allowed
-                #    elif src == self.primary_source and path not in ('/Ac/Out/L1/F', '/Ac/Out/F'):   
-                #        pass  # allowed
-                #    else:
-                #        continue  # skip
                 
-                    
+                #if inverter reports Inverting but current is 0, force Standby ---
+                if dgn == 0x1FFD4 and service is self._InverterService and path == '/State':
+                    # Venus OS enum: 9 = Inverting, 1 = Standby
+                    if int(value) == 9:
+                        # Prefer the explicit L1 voltage; fall back to the aggregate if needed
+                        i_out = (self._InverterService['/Ac/Out/L1/I'] or self._InverterService['/Ac/Out/I'] or 0)
+                        logger.debug(f"[{self.frame_count:06}] [Inverter State OVERRIDE] Inverting→Standby; Incoming RV-C State={value} | Current out={i_out} A | Data={data.hex(' ').upper()}")
+
+                        # Treat no current as Standby.
+                        if i_out == 0:   
+                            value = 1  # Standby
+                             
+                   
                 try:
                     service[path] = value       # → pushes to D-Bus
                         
@@ -1495,7 +1491,7 @@ class XantrexService:
                     
                 return False
  
-        def set_status(self):
+        def set_state(self):
             def check_path(value, default=0):
                 return default if value is None else value
 
@@ -1520,32 +1516,34 @@ class XantrexService:
                     f"ac_in_V={ac_volts_in:.1f}V, "
                     f"inv_state={int(check_path(inverter_service['/State']))}, "
                     f"chg_state={int(check_path(charger_service['/State']))}"
-)
+                )
 
-                # ---------------- CHARGER /State ----------------
+                # comment out to try the DGN decoder changes
+                
+                        # ---------------- CHARGER /State ----------------
                 # Leave non-zero state alone; only set when currently Off (0) assuming it will be set by a frame
-                if check_path( charger_service['/State']) == 0:   # off  Do not trust it when not set, but if it is, leave it be assuming it came from a good frame.                
-                    if ac_volts_in  > 0:  # incoming volts
-                        charger_service['/State']  = 3   # float just a default  probably not correct, need more data???  
-                    else:
-                        charger_service['/State'] = 0
+                #if check_path( charger_service['/State']) == 0:   # off  Do not trust it when not set, but if it is, leave it be assuming it came from a good frame.                
+                #    if ac_volts_in  > 0:  # incoming volts
+                #        charger_service['/State']  = 3   # float just a default  probably not correct, need more data???  
+                #    else:
+                #        charger_service['/State'] = 0
                 
                 # ---------------- INVERTER /State ----------------                
                 # check the inverter paths to set it's /State
                 #if check_path( inverter_service['/State']) == 0:   # off  Do not trust it when not set, but if it is, leave it be assuming it came from a good frame.
 
                 # Assist (10): shore present AND battery is discharging
-                if grid_current and battery_current is not None and  battery_current < 0:
-                    inverter_service['/State'] = 10   # venus os assisting value
+                #if grid_current and battery_current is not None and  battery_current < 0:
+                #    inverter_service['/State'] = 10   # venus os assisting value
 
-                elif ac_volts_in == 0 and ac_current_out > 0:
-                    inverter_service['/State'] = 9  # Inverting
+                #elif ac_volts_in == 0 and ac_current_out > 0:
+                #    inverter_service['/State'] = 9  # Inverting
                     
-                elif ac_volts_out > 0:   # no current but voltage    
-                    inverter_service['/State'] = 1   # standby
+                #elif ac_volts_out > 0:   # no current but voltage    
+                #    inverter_service['/State'] = 1   # standby
                        
-                elif ac_volts_in > 0:   
-                    inverter_service['/State'] = 8   # pass-through
+                #elif ac_volts_in > 0:   
+                #    inverter_service['/State'] = 8   # pass-through
     
 
             else:   # the unit is off
@@ -1581,7 +1579,7 @@ class XantrexService:
                 logger.info(f"[HEARTBEAT] {self.last_heartbeat}")
                 
                 # check /Status to set  /mode  rv-c from xantrex does not send it.
-                set_status(self)
+                set_state(self)
                 sync_mode_from_status(self)
 
 
