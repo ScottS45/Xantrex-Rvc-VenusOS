@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Version: 2.1.816.2025.10.27
-# Date: 2025-10-27
+# Version: 2.1.822.2025.10.30
+# Date: 2025-10-30
 
 # Xantrex Freedom Pro RV-C D-Bus Driver
 #
@@ -315,6 +315,22 @@ def safe_ascii(data_slice):
         return cleaned.decode('ascii').strip()
     except UnicodeDecodeError:
         return None       
+        
+
+# Xantrex encodes charger/inverter current as a LITTLE-ENDIAN u16 with a zero-offset at 0x7D00
+# (per docs: “special value 0 A = 0x7D00”). The physical scale is fixed at 0.05 A/bit.
+# We also treat 0xFFFF as N/A.
+def u16_current(d: bytes, off: int = 3) -> float | None:
+    raw = d[off] | (d[off + 1] << 8)   # Little E u16
+    if raw == 0xFFFF:
+        return None
+
+    delta = raw - 0x7D00   # -1600
+    if delta == 0:
+        return 0.0
+
+    return delta * 0.05  # maybe we need to round this?
+
 
     
 def fahrenheit_to_c(val):
@@ -327,6 +343,9 @@ def fahrenheit_to_c(val):
 # Each DGN (Diagnostic Group Number) corresponds to a specific RV-C data packet
 # The lambda decoders extract meaningful values (voltage, current, state, etc.) from the binary payload
 # Units and scaling factors are defined by the RV-C specification or device-specific implementation
+
+#*********   N  O   T   E    ****************
+#*******  see some voltage /Current decoders are even numbered for some.  Those are ones I have not received back and they are most likely off by 1.  IE should 1 vs 2, 3 instead of 4. etc.  I am not worried about it until the data comes back.
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  INVERTER_DGN_MAP  
@@ -354,24 +373,24 @@ INVERTER_DGN_MAP = {
         ('/Ac/In/F',                   lambda d: safe_u16(d, 2, 0.01),           'Hz',    'AC Input Frequency'),
         ('/Ac/In/L1/V',                lambda d: safe_u16(d, 0, 0.05),           'V',     'AC Input L1 Voltage (alias)'),
         ('/Ac/In/L1/F',                lambda d: safe_u16(d, 2, 0.01),           'Hz',    'AC Input L1 Frequency (alias)'),
-        ('/Ac/In/L1/I',                lambda d: safe_u8( d, 3, 0.05),           'A',     'AC Input L1 Current'),
+        ('/Ac/In/L1/I',                lambda d: u16_current(d, 3),              'A',     'AC Input L1 Current'),
         ('/Ac/Grid/L1/V',              lambda d: safe_u16(d, 0, 0.05),           'V',     'AC Input L1 Voltage (Grid)'),
-        ('/Ac/Grid/L1/I',              lambda d: safe_u8( d, 3, 0.05),           'A',     'AC Input L1 Current (Grid)'),
+        ('/Ac/Grid/L1/I',              lambda d: u16_current(d, 3),              'A',     'AC Input L1 Current (Grid)'),
         ('/Ac/Grid/L1/ApparentPower',  lambda d: (None if safe_u16(d, 0, 0.01) is None or safe_u8(d, 3, 0.05) is None else round(safe_u16(d, 0, 0.01) * safe_u8(d, 3, 0.05), 1)), 'VA', 'AC Input L1 Apparent Power (Grid)'),
     ],
     0x1FFD7: [  # INVERTER_AC_STATUS_1
         ('/Ac/Out/L1/V',               lambda d: safe_u16(d, 1, 0.05),           'V',     'AC Output L1 Voltage'),
-        ('/Ac/Out/L1/I',               lambda d: safe_u8(d,  3, 0.1),            'A',     'AC Output L1 Current'),
+        ('/Ac/Out/L1/I',               lambda d: u16_current(d, 3),              'A',     'AC Output L1 Current'),
         ('/Ac/Out/L1/F',               lambda d: safe_u16(d, 5, 2.0, 'big'),     'Hz',    'AC Output Frequency'),
         ('/Ac/Out/V',                  lambda d: safe_u16(d, 1, 0.05),           'V',     'AC Output L1 Voltage'),
-        ('/Ac/Out/I',                  lambda d: safe_u8(d,  3, 0.1),            'A',     'AC Output L1 Current'),
+        ('/Ac/Out/I',                  lambda d: u16_current(d, 3),              'A',     'AC Output L1 Current'),
         ('/Ac/Out/F',                  lambda d: safe_u16(d, 5, 2.0, 'big'),     'Hz',    'AC Output Frequency'),
     ],
     0x1FEE8: [  # INVERTER_DC_STATUS
         ('/Dc/0/Voltage',              lambda d: safe_u16(d, 1, 0.05, 'little'), 'V',     'DC 0 Voltage'),
-        ('/Dc/0/Current',              lambda d: safe_u8( d, 3, 0.05, 'little'), 'A',     'DC 0 Current'),
+        ('/Dc/0/Current',              lambda d: u16_current(d, 3),              'A',     'DC 0 Current'),
         ('/Dc/Voltage',                lambda d: safe_u16(d, 1, 0.05, 'little'), 'V',     'DC 0 Voltage'),
-        ('/Dc/Current',                lambda d: safe_u8( d, 3, 0.05, 'little'), 'A',     'DC 0 Current'),
+        ('/Dc/Current',                lambda d: u16_current(d, 3),              'A',     'DC 0 Current'),
     ],
     0x1FEA2: [  # INVERTER_STATUS_2 (DC Input Voltage & Current)
         ('/Dc/0/Voltage',              lambda d: safe_u16(d, 2, 0.05),           'V',     'DC Input Voltage'),
@@ -472,11 +491,11 @@ CHARGER_DGN_MAP = {
     ],
     0x1FFC7: [  # CHARGER_STATUS
         ('/TargetVoltage',           lambda d: safe_u16(d, 1, 0.05, 'little'),   'V',     'Charge control voltage (target)'),
-        ('/TargetCurrent',           lambda d: safe_u16(d, 3, 0.05, 'big'),      'A',     'Charge control current (target)'),
+        ('/TargetCurrent',           lambda d: u16_current(d, 3),                'A',     'Charge control current (target)'),
         ('/Dc/0/Voltage',            lambda d: safe_u16(d, 1, 0.05, 'little'),   'V',     'Battery Voltage'),
-        ('/Dc/0/Current',            lambda d: safe_u16(d, 3, 0.05, 'big'),      'A',     'Battery Charge Current'),
+        ('/Dc/0/Current',            lambda d: u16_current(d, 3),                'A',     'Battery Charge Current'),
         ('/Battery/Voltage',         lambda d: safe_u16(d, 1, 0.05, 'little'),   'V',     'Battery Voltage'),
-        ('/Battery/Current',         lambda d: safe_u16(d, 3, 0.05, 'big'),      'A',     'Battery Charge Current'),
+        ('/Battery/Current',         lambda d: u16_current(d, 3),                'A',     'Battery Charge Current'),
         ('/Dc/0/PowerPercent',       lambda d: safe_u8( d, 5),                   '%',     'Charge current as % of maximum'),
         ('/State',                   lambda d: RVC_CHG_STATE.get(int(safe_u8(d, 6) or 0), 0), '', 'Charger operating state'),
     ],
@@ -490,10 +509,10 @@ CHARGER_DGN_MAP = {
         ('/Ac/In/L1/Distortion',     lambda d: safe_u8(d, 6),                    '%',   'Harmonic distortion'),
         # byte 7 complementary‑leg instance (NA here)
     ],
-    0x1FFC6: [  # CHARGER_CONFIGURATION_STATUS
+    0x1FFC6: [  # CHARGER_CONFIGURATION_STATUS   # not seen in 2 months of logs
         ('/Status',                  lambda d: safe_u8(d, 0),                    '',      'Charger Status'),
         ('/TargetVoltage',           lambda d: safe_u16(d, 1, 0.01),             'V',     'Target Voltage'),
-        ('/TargetCurrent',           lambda d: safe_u16(d, 3, 0.1),              'A',     'Target Current'),
+        ('/TargetCurrent',           lambda d: u16_current(d, 3),                'A',     'Target Current'),
         ('/MaximumCurrent',          lambda d: safe_u16(d, 5, 0.1),              'A',     'Maximum Current'),
     ],
     0x1FFC5: [  # CHARGER_COMMAND
@@ -608,33 +627,33 @@ COMMON_DGN_MAP = {
     ],
     0x1FFCA: [  # CHARGER_AC_STATUS_1
         ('/Ac/In/L1/V',              lambda d: safe_u16(d, 1, 0.05),                'V',     'AC Input L1 Voltage'),
-        ('/Ac/In/L1/I',              lambda d: safe_u8( d, 3, 0.05),                'A',     'AC Input L1 Current'),
+        ('/Ac/In/L1/I',              lambda d: u16_current(d, 3),                   'A',     'AC Input L1 Current'),
         ('/Ac/In/L1/P',              lambda d: (None
                                                if safe_u16(d, 1, 0.05) is None
-                                               or safe_u8( d, 3, 0.05) is None
-                                               else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
+                                               or u16_current(d, 3)    is None
+                                               else round(safe_u16(d, 1, 0.05) * u16_current(d, 3), 1)),
                                                                                     'W',     'AC Input L1 Power'),
         ('/Ac/In/L1/F',              lambda d: safe_u16(d, 5, 1/128.0),             'Hz',    'AC Input L1 Frequency'),                                                                        
         ('/Ac/ActiveIn/L1/V',        lambda d: safe_u16(d, 1, 0.05),                'V',     'Active AC Input L1 Voltage'),
-        ('/Ac/ActiveIn/L1/I',        lambda d: safe_u8( d, 3, 0.05),                'A',     'Active AC Input L1 Current'),
+        ('/Ac/ActiveIn/L1/I',        lambda d: u16_current(d, 3),                   'A',     'Active AC Input L1 Current'),
         ('/Ac/ActiveIn/L1/P',        lambda d: (None
                                                if safe_u16(d, 1, 0.05) is None
-                                               or safe_u8( d, 3, 0.05) is None
-                                               else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
+                                               or u16_current(d, 3)    is None
+                                               else round(safe_u16(d, 1, 0.05) * u16_current(d, 3), 1)),
                                                                                     'W',     'Active AC Input L1 Power'),
         ('/Ac/ActiveIn/L1/F',        lambda d: safe_u16(d, 5, 1/128.0),             'Hz',    'Active AC Input L1 Frequency'), 
         ('/Ac/In/V',                 lambda d: safe_u16(d, 1, 0.05),                'V',     'AC Input Voltage (total)'),
-        ('/Ac/In/I',                 lambda d: safe_u8( d, 3, 0.05),                'A',     'AC Input Current (total)'),
+        ('/Ac/In/I',                 lambda d: u16_current(d, 3),                   'A',     'AC Input Current (total)'),
         ('/Ac/In/Power',             lambda d: (None
                                             if safe_u16(d, 1, 0.05) is None
-                                            or safe_u8( d, 3, 0.05) is None
-                                            else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
+                                            or u16_current(d, 3) is None
+                                            else round(safe_u16(d, 1, 0.05) * u16_current(d, 3), 1)),
                                                                                     'W',     'AC Input Power (total, apparent)'),
         ('/Ac/In/F',                 lambda d: safe_u16(d, 5, 1/128.0),             'Hz',    'AC Input Frequency (total)'),
         ('/Ac/ActiveIn/Power',       lambda d: (None
                                             if safe_u16(d, 1, 0.05) is None
-                                            or safe_u8( d, 3, 0.05) is None
-                                            else round(safe_u16(d, 1, 0.05) * safe_u8(d, 3, 0.05), 1)),
+                                            or u16_current(d, 3)    is None
+                                            else round(safe_u16(d, 1, 0.05) * u16_current(d, 3), 1)),
                                                                              'W',  'Active AC Input Power (total, apparent)'),
         ('/Ac/ActiveIn/Connected',   lambda d: (1 if (safe_u16(d, 1, 0.05) or 0) > 85.0 else 0), '',   'Active AC Input present'),
     ],    

@@ -1,6 +1,11 @@
 ## Changelog
 
 
+### Oct 30, 2025 - 2.1.822.2025.10.30
+- Add a new function to handle the current decoding.  
+  - replace the current DGN decoders with the new function.
+
+
 ### Oct 27, 2025 (2)
 - Add additional paths for FFCA to help fill in missing AC IN data.
 - Add additional paths for FFC7 to help fill in missing DC info when charging.
