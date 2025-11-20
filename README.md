@@ -3,7 +3,7 @@
 
 ### 🙏 Acknowledgements - Nov, 20 2025
 Big thank-you to **Stephen Tenburg**!  
-My focus was mostly the inverter side.  I had the charger side, roughly working, but not finished.  He greatly helped with finishing and polishing the charger support, which is now solid and well-tested.
+My focus was mostly the inverter side.  I had the charger side, roughly working, but not finished.  He greatly helped me finish the charger support, which is now solid and well-tested.
 
 Stephen wrote an **in-depth, step-by-step guide** for using this driver with a **VE Cerbo GX**:  
 [Connecting a Victron Cerbo to a Xantrex XC-Pro](https://www.avoidpitfalls.com/connecting-a-victron-cerbo-or-venus-to-a-xantrex-xc-pro/)
