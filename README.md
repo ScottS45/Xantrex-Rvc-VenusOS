@@ -1,5 +1,14 @@
 # Xantrex RV-C → Venus OS D-Bus Driver (Cerbo or Pi)
 
+
+### 🙏 Acknowledgements - Nov, 20 2025
+Big thank-you to **Stephen Tenburg**!  
+My focus was mostly the inverter side.  I had the charger side, roughly working, but not finished.  He greatly helped with finishing and polishing the charger support, which is now solid and well-tested.
+
+Stephen wrote an **in-depth, step-by-step guide** for using this driver with a **VE Cerbo GX**:  
+[Connecting a Victron Cerbo to a Xantrex XC-Pro](https://www.avoidpitfalls.com/connecting-a-victron-cerbo-or-venus-to-a-xantrex-xc-pro/)
+
+
 **Date Updated:** Sep 14, 2025  
 **Scott Sheen**
 
@@ -113,7 +122,10 @@ python3 /data/xantrex-monitor/xantrex_service.py --debug --verbose
 - Open an issue for bugs, new DGN decoders, or Venus OS path mapping suggestions.
 - Unless otherwise noted, contributions are accepted under the same license (MIT).
 
+
+
 -------------------------------------------------------------------------------
+
 
 ## LICENSE
 
