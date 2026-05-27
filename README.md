@@ -9,6 +9,28 @@ Stephen wrote an **in-depth, step-by-step guide** for using this driver with a *
 [Connecting a Victron Cerbo to a Xantrex XC-Pro](https://www.avoidpitfalls.com/connecting-a-victron-cerbo-or-venus-to-a-xantrex-xc-pro/)
 
 
+
+**Date Updated:** Sep 14, 2025  - version 2.1.849 - 2026-05-26
+**Scott Sheen**
+
+
+** Changed
+- Added detection for Victron battery monitor services, such as BMV and SmartShunt.
+- When a battery monitor is present, the driver now skips publishing Xantrex inverter `/Dc/0/Current` from DGN `0x1FEE8`.
+- This prevents Venus OS/SystemCalc from double-counting inverter DC draw in the GUI DC Loads tile while inverting.
+- Left Xantrex DC voltage publishing active so the inverter service can still expose DC voltage information.
+
+** Fixed
+- Fixed Venus OS GUI DC Loads appearing roughly doubled when a SmartShunt/BMV battery monitor was already present.
+- Improved normal-mode logging behavior so previous verbose/debug logs are not cleared when running without parameters.
+- Broke out skipped sources instead of including them in the succesful count
+
+** Notes
+- Systems without a Victron battery monitor will continue to publish Xantrex inverter `/Dc/0/Current`.
+- Non VE battery monitors that publish on D-Bus, may need to update the script for their name, to not see doubled DC load in the GUI.
+
+
+
 **Date Updated:** Sep 14, 2025  
 **Scott Sheen**
 

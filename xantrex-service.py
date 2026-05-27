@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-# Version: 2.1.822.2025.10.30
-# Date: 2025-10-30
-
+# Version: 2.1.849.2026.05.26
+# Date: 2026-05-26
 # Xantrex Freedom Pro RV-C D-Bus Driver
-#
+# 
 # This script reads raw RV-C (CAN) data from a Xantrex Freedom Pro inverter/charger
 # and publishes meaningful decoded values to the Venus OS D-Bus using com.victronenergy.inverter.can_xantrex.
 # Other RV-C  supporting inverters chargers may work as well.
@@ -80,7 +79,7 @@ DEVICE_INSTANCE     = 252       # just radomly picked, can not clash with one al
 PRODUCT_ID          = 0xA045
 FIRMWARE_VERSION    = '2.14'    # hard coded, matches mine.  Can be picked up by DGN though it is not transmitted when requested.
 PRODUCT_NAME        = 'Freedom XC Pro'
-SCRIPT_VERSION      = '2.1.705.2025.09.08'
+SCRIPT_VERSION      = '2.1.848.2026.05.26'
 MAX_UNMAPPED_DGNS   = 100
 
 # ManufacturerCode = 119
@@ -136,8 +135,9 @@ LOG_DIR = '/data/xantrex-monitor/logs'
 os.makedirs(LOG_DIR, exist_ok=True)
 
 log_file_path = f'{LOG_DIR}/xantrex.log'
-if os.path.exists(log_file_path):
-    os.remove(log_file_path)
+if args.debug or args.verbose:
+    if os.path.exists(log_file_path):
+        os.remove(log_file_path)
 
 logger = logging.getLogger("xantrex")
 logger.handlers.clear()        # remove any inherited handlers
@@ -321,15 +321,18 @@ def safe_ascii(data_slice):
 # (per docs: “special value 0 A = 0x7D00”). The physical scale is fixed at 0.05 A/bit.
 # We also treat 0xFFFF as N/A.
 def u16_current(d: bytes, off: int = 3) -> float | None:
-    raw = d[off] | (d[off + 1] << 8)   # Little E u16
+    if len(d) < off + 2:
+        return None
+
+    raw = d[off] | (d[off + 1] << 8)
     if raw == 0xFFFF:
         return None
 
-    delta = raw - 0x7D00   # -1600
+    delta = raw - 0x7D00
     if delta == 0:
         return 0.0
 
-    return delta * 0.05  # maybe we need to round this?
+    return round(delta * 0.05, 3)
 
 
     
@@ -381,10 +384,10 @@ INVERTER_DGN_MAP = {
     0x1FFD7: [  # INVERTER_AC_STATUS_1
         ('/Ac/Out/L1/V',               lambda d: safe_u16(d, 1, 0.05),           'V',     'AC Output L1 Voltage'),
         ('/Ac/Out/L1/I',               lambda d: u16_current(d, 3),              'A',     'AC Output L1 Current'),
-        ('/Ac/Out/L1/F',               lambda d: safe_u16(d, 5, 2.0, 'big'),     'Hz',    'AC Output Frequency'),
+        ('/Ac/Out/L1/F',               lambda d: safe_u16(d, 5, 1/128.0),        'Hz',      'AC Output Frequency'),
         ('/Ac/Out/V',                  lambda d: safe_u16(d, 1, 0.05),           'V',     'AC Output L1 Voltage'),
         ('/Ac/Out/I',                  lambda d: u16_current(d, 3),              'A',     'AC Output L1 Current'),
-        ('/Ac/Out/F',                  lambda d: safe_u16(d, 5, 2.0, 'big'),     'Hz',    'AC Output Frequency'),
+        ('/Ac/Out/F',                  lambda d: safe_u16(d, 5, 1/128.0),        'Hz',      'AC Output Frequency'),
     ],
     0x1FEE8: [  # INVERTER_DC_STATUS
         ('/Dc/0/Voltage',              lambda d: safe_u16(d, 1, 0.05, 'little'), 'V',     'DC 0 Voltage'),
@@ -397,7 +400,7 @@ INVERTER_DGN_MAP = {
         ('/Dc/0/Current',              lambda d: safe_u16(d, 4, 0.01),           'A',     'DC Input Current'),
     ],
     0x1FFCD: [  # INVERTER_APS_STATUS
-        ('/Ac/Out/L1/F',               lambda d: safe_u16(d, 5, 2.0, 'big'),     'Hz',    'AC Output L1 Frequency'),
+        ('/Ac/Out/L1/F',               lambda d: safe_u16(d, 5, 1/128.0),        'Hz',    'AC Output L1 Frequency'),
         ('/Ac/Out/L1/S',               lambda d: safe_u16(d, 2),                 'VA',    'AC Output L1 Apparent Power'),
         ('/Ac/Out/L1/P',               lambda d: safe_u16(d, 4),                 'W',     'AC Output L1 Active Power'),
         ('/Ac/Out/L1/Q',               lambda d: safe_u16(d, 6),                 'VAR',   'AC Output L1 Reactive Power'),
@@ -787,16 +790,17 @@ class XantrexService:
         self.verbose = verbose
 
         # Runtime counters and internal state
-        self.frame_count         = 0                 # Total CAN frames received
-        self.error_count         = 0                 # Total decode errors
-        self.loop                = None              # Reference to the GLib main loop        
-        self.last_heartbeat      = time.time()       # Timestamp of last valid frame received
-        self.last_dgn            = 0 
-        self.last_src            = 0
-        self.unmapped_seen       = set()             # DGNs we've seen but aren't in the DGN_MAPs
-        self.unmapped_counts     = {}                # Unmapped DGN => count of how many times it's seen
-        self.heartbeat_counter   = 0        
-        self.isthereaframe       = 0
+        self.frame_count          = 0                 # Total CAN frames received
+        self.error_count          = 0                 # Total decode errors
+        self.skipped_source_count = 0                 # Frames ignored because source address is not Xantrex
+        self.loop                 = None              # Reference to the GLib main loop        
+        self.last_heartbeat       = time.time()       # Timestamp of last valid frame received
+        self.last_dgn             = 0 
+        self.last_src             = 0
+        self.unmapped_seen        = set()             # DGNs we've seen but aren't in the DGN_MAPs
+        self.unmapped_counts      = {}                # Unmapped DGN => count of how many times it's seen
+        self.heartbeat_counter    = 0        
+        self.isthereaframe        = 0
         
         # Xantrex discovery (EE00)
         # we should not be hard coding these values, but xantrex does not seem to respond to the request
@@ -821,6 +825,9 @@ class XantrexService:
         
         self._InverterService.descriptor = 'INVERTER'
         self._ChargerService.descriptor  = 'CHARGER' 
+        
+        self.has_battery_monitor = self.detect_battery_monitor()
+        logger.info(f"Battery monitor detected: {self.has_battery_monitor}")
         
         # Build one dispatch table, once at startup:
         #    dgn → (dgn_items, dbus_paths)
@@ -1052,6 +1059,28 @@ class XantrexService:
                 logger.info(f"[register_path] '{path}' already exists on {service.descriptor}, skipping creation.    value: {value!r}")
                 
         return item
+        
+    def detect_battery_monitor(self) -> bool:
+        try:
+            for name in self.inverter_bus.list_names():
+                name = str(name)
+
+                if not name.startswith('com.victronenergy.battery.'):
+                    continue
+
+                try:
+                    obj = self.inverter_bus.get_object(name, '/ProductName')
+                    product_name = obj.GetValue(dbus_interface='com.victronenergy.BusItem')
+                except Exception:
+                    product_name = ''
+
+                logger.info(f"[BATTERY MONITOR FOUND] service={name} product={product_name!r}")
+                return True
+
+        except Exception as e:
+            logger.warning(f"[BATTERY MONITOR CHECK FAILED] {e}")
+
+        return False        
     
     # send a request to the unit
     def send_pgn_request(self, pgn: int, global_request: bool = False) -> bool:
@@ -1077,10 +1106,11 @@ class XantrexService:
                     logger.info(f"Sent PGN request for 0x{pgn:05X}")
                     return True
                 except OSError as e:
-                    if attempt < 6:
+                    if attempt < 5:
                         time.sleep(0.05 )
                         continue
                         
+                    logger.error(f"Failed to send PGN request 0x{pgn:05X} after retries: {e}")
                     return False
         except Exception as e:
             logger.error(f"Failed to send PGN request 0x{pgn:05X}: {e}")
@@ -1153,8 +1183,8 @@ class XantrexService:
 
 
         # Individual power paths (DC & AC) – single-phase Freedom XC
-        compute_power('/Dc/0/Power',       '/Dc/0/Voltage',     '/Dc/0/Current')
-        compute_power('/Dc/Power',         '/Dc/0/Voltage',     '/Dc/0/Current')        
+        #compute_power('/Dc/0/Power',       '/Dc/0/Voltage',     '/Dc/0/Current')
+        #compute_power('/Dc/Power',         '/Dc/0/Voltage',     '/Dc/0/Current')        
 
         # these are in the decoder blocks, a bit more efficient maybe.
         #compute_power('/Ac/In/L1/P',       '/Ac/In/L1/V',       '/Ac/In/L1/I')
@@ -1163,7 +1193,7 @@ class XantrexService:
 
         # Totals + aliases  (/Ac/In → /Ac/Grid ,  /Ac/Out → /System/Ac)
         compute_totals('/Ac/In',   aliases=['/Ac/Grid'])
-        compute_totals('/Ac/Out',  aliases=['/Ac/Out/Total'])        
+        #compute_totals('/Ac/Out',  aliases=['/Ac/Out/Total'])        
         #compute_totals('/Ac/Out', aliases=['/System/Ac'])
 
 
@@ -1265,6 +1295,7 @@ class XantrexService:
 
                         temp = re.search(r'U3:0*([0-9]{1,2}\.[0-9]{2})', assembled_txt)
                         if temp is not None:
+                            global FIRMWARE_VERSION
                             FIRMWARE_VERSION = temp.group(1)
                             self._InverterService['/FirmwareVersion'] = FIRMWARE_VERSION   
                             self._ChargerService['/FirmwareVersion']  = FIRMWARE_VERSION   
@@ -1277,7 +1308,7 @@ class XantrexService:
                         
             except Exception as e:    
                 if self.debug:
-                    logger.exception(f"[{self.frame_count:06}] [ASSEMBLED FAIL ] PGN=0x{getattr(self,'last_dgn',0):05X} SA=0x{getattr(self,'last_src',0):02X} {dst_path} – {e}")
+                    logger.exception(f"[{self.frame_count:06}] [ASSEMBLED FAIL] PGN=0x{getattr(self,'last_dgn',0):05X} SA=0x{getattr(self,'last_src',0):02X} – {e}")
 
             
 
@@ -1343,7 +1374,6 @@ class XantrexService:
             dgn = pgn                       # In RV-C, the DGN is just the PGN
             
 
-
             # Find Xantrex sources from NAME (EE00) - Claims
             if (dgn == 0x1EE00) or (dgn == 0x00EE00):
                 if len(data) >= 8:
@@ -1371,6 +1401,7 @@ class XantrexService:
                     #continue #processing the frame.            
                 else:
                     if self.xantrex_sources and (src not in self.xantrex_sources):
+                        self.skipped_source_count += 1
                         logger.info(f"[{self.frame_count:06}] [CAN ID - SOURCE SKIPPED] 0x{can_id:08X} → PGN=0x{pgn:05X} DGN=0x{dgn:05X} SRC=0x{src:02X} DLC={can_dlc} DATA=[{data.hex(' ').upper()}]")
                         return True
        
@@ -1479,7 +1510,15 @@ class XantrexService:
                         if i_out == 0:   
                             value = 1  # Standby
                              
-                   
+
+                if (
+                    self.has_battery_monitor
+                    and service is self._InverterService
+                    and dgn == 0x1FEE8
+                ):
+                    logger.info(f"[SKIPPED][{service.descriptor}] DGN=0x{dgn:05X} | path={path} | value={value} {unit} | reason=battery monitor present")
+                    continue
+                    
                 try:
                     service[path] = value       # → pushes to D-Bus
                         
@@ -1654,16 +1693,17 @@ class XantrexService:
 
         # === Summary Block ===
         unmapped_total = sum(self.unmapped_counts.values())
-        successful_decodes = self.frame_count - unmapped_total - self.error_count
+        successful_decodes = self.frame_count - unmapped_total - self.error_count - self.skipped_source_count
 
         try:
-            assert (unmapped_total + self.error_count + successful_decodes) == self.frame_count
+            assert (unmapped_total + self.error_count + self.skipped_source_count + successful_decodes) == self.frame_count
         except AssertionError:
             logger.warning("⚠️ Frame count mismatch in summary!")
 
         logger.info("=== Shutdown Summary ===")
         logger.info(f"  Total frames received      : {self.frame_count}")
         logger.info(f"  Decoded successfully       : {successful_decodes}")
+        logger.info(f"  Source skipped frames      : {self.skipped_source_count}")        
         logger.info(f"  Unmapped DGNs              : {unmapped_total}")
         logger.info(f"  Decode errors              : {self.error_count}")
         logger.info("==========================")
@@ -1672,11 +1712,11 @@ class XantrexService:
         # Define each cleanup step as (description, callable)
         steps = [
             ("remove watch_id",              lambda: ((GLib.source_remove(self.watch_id), setattr(self, 'watch_id', None))[1] if getattr(self, 'watch_id', None) else None)),
+            ("remove timeout_heartbeat",     lambda: ((GLib.source_remove(self.timeout_heartbeat), setattr(self, 'timeout_heartbeat', None))[1] if getattr(self, 'timeout_heartbeat', None) else None)),
             ("quit main loop",               lambda: self.loop.quit() if getattr(self, 'loop', None) else None),
             ("close CAN socket",             lambda: self.socket.close() if getattr(self, 'socket', None) else None),
             ("close inverter bus",           lambda: getattr(self, 'inverter_bus', None) and self.inverter_bus.close()),
             ("close charger  bus",           lambda: getattr(self, 'charger_bus',  None) and self.charger_bus.close()),
-            ("remove timeout_heartbeat",     lambda: GLib.source_remove(self.timeout_heartbeat) if getattr(self, 'timeout_heartbeat', None) else None),
         ]
 
         # Run each step and catch its errors individually
